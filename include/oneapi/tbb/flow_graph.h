@@ -1,5 +1,5 @@
 /*
-    Copyright (c) 2005-2024 Intel Corporation
+    Copyright (c) 2005-2025 Intel Corporation
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -85,7 +85,7 @@ class continue_msg {};
 } // namespace d2
 
 #if __TBB_CPP20_CONCEPTS_PRESENT
-namespace d0 {
+inline namespace d0 {
 
 template <typename ReturnType, typename OutputType>
 concept node_body_return_type = std::same_as<OutputType, tbb::detail::d2::continue_msg> ||
@@ -127,7 +127,7 @@ template <typename Body, typename Input, typename GatewayType>
 concept async_node_body = std::copy_constructible<Body> &&
                           std::invocable<Body&, const Input&, GatewayType&>;
 
-} // namespace d0
+} // inline namespace d0
 #endif // __TBB_CPP20_CONCEPTS_PRESENT
 
 namespace d2 {
@@ -138,6 +138,7 @@ template< typename T > class receiver;
 class continue_receiver;
 
 template< typename T, typename U > class limiter_node;  // needed for resetting decrementer
+template< typename T > class overwrite_node; // needed for the forward friend declaration to work in GCC < 8
 
 template<typename T, typename M> class successor_cache;
 template<typename T, typename M> class broadcast_cache;
@@ -329,6 +330,7 @@ protected:
     virtual graph& graph_reference() const = 0;
 
     template<typename TT, typename M> friend class successor_cache;
+    template< typename TTT > friend class overwrite_node;
     virtual bool is_continue_receiver() { return false; }
 
     // TODO revamp: reconsider the inheritance and move node priority out of receiver
@@ -3318,6 +3320,12 @@ public:
         spin_mutex::scoped_lock l( my_mutex );
         if (my_buffer_is_valid && is_graph_active( my_graph )) {
             // We have a valid value that must be forwarded immediately.
+            if (s.is_continue_receiver()) {
+                // try_put can never fail, since continue_receivers always accept
+                my_successors.register_successor( s );
+                s.try_put( my_buffer );
+                return true;
+            }
             bool ret = s.try_put( my_buffer );
             if ( ret ) {
                 // We add the successor that accepted our put
